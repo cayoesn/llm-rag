@@ -1,149 +1,284 @@
-# LLM-RAG Platform 🚀
+# LLM-RAG Platform
 
-LLM-RAG is an enterprise-grade, open-source RAG (Retrieval-Augmented Generation) and LLMOps platform designed for local-first execution. It provides a modular architecture for document ingestion, semantic search, and context-aware LLM generation, with a heavy focus on professional observability and asynchronous processing.
+![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?style=for-the-badge&logo=docker&logoColor=white)
+![Qdrant](https://img.shields.io/badge/Qdrant-Vector_DB-DC244C?style=for-the-badge)
+![MLflow](https://img.shields.io/badge/MLflow-Tracking-0194E2?style=for-the-badge)
 
-## 🏗️ Architecture
+> Plataforma local-first para RAG, LLMOps e observabilidade.
+
+O projeto foi montado como um case reproduzível: ele mostra como combinar API, fila assíncrona, banco vetorial, modelos locais, tracing, métricas e tracking de experimentos em um fluxo completo de ingestão e pergunta-resposta.
+
+O objetivo principal é servir como referência para futuros projetos: quem abrir este repositório deve entender quais serviços existem, por que eles foram incluídos, como subir tudo, como usar a aplicação e onde verificar cada parte do fluxo.
+
+## 📚 Sumário
+
+- [🧭 Visão Geral](#visao-geral)
+- [🏗️ Arquitetura](#arquitetura)
+- [🔄 Fluxos do Projeto](#fluxos-do-projeto)
+- [🧰 Tecnologias e Serviços](#tecnologias-e-servicos)
+- [📁 Estrutura do Repositório](#estrutura-do-repositorio)
+- [🚀 Instalação](#instalacao)
+- [🧪 Como Usar](#como-usar)
+- [🔎 Como Verificar Cada Serviço](#como-verificar-cada-servico)
+- [📊 Observabilidade](#observabilidade)
+- [✅ Testes e Coverage](#testes-e-coverage)
+- [🛠️ Troubleshooting](#troubleshooting)
+
+<a id="visao-geral"></a>
+
+## 🧭 Visão Geral
+
+Este projeto implementa um fluxo RAG com duas jornadas principais:
+
+1. Ingestão de PDF: o usuário envia um PDF para a API, a tarefa é enviada para uma fila Redis, um worker processa o arquivo, gera chunks, cria embeddings no Ollama e grava vetores no Qdrant.
+2. Chat com RAG: o usuário envia uma pergunta, a API gera embedding da pergunta, busca documentos semelhantes no Qdrant, monta o prompt com contexto e chama um LLM local via Ollama.
+
+Além do fluxo funcional, a plataforma inclui:
+
+- métricas HTTP e runtime expostas para Prometheus;
+- dashboards manuais no Grafana;
+- tracing distribuído com OpenTelemetry e Jaeger;
+- tracking de runs com MLflow;
+- tracing de prompts com Langfuse quando configurado;
+- testes automatizados com coverage mínimo de 80%.
+
+<a id="arquitetura"></a>
+
+## 🏗️ Arquitetura
 
 ```mermaid
 graph TD
-    User((User)) --> API[FastAPI]
-    API --> Redis[(Redis Queue)]
-    Redis --> Worker[Async Worker]
+    User[Usuário] --> API[FastAPI API]
+
+    API -->|POST /ingest| Redis[(Redis Queue)]
+    Redis --> Worker[RQ Worker]
     Worker --> Ingestion[Ingestion Pipeline]
-    Ingestion --> Ollama[Ollama Embeddings]
-    Ingestion --> Qdrant[(Qdrant Vector DB)]
-    
-    API --> RAG[RAG Service]
-    RAG --> Qdrant
-    RAG --> Ollama[Ollama LLM]
-    
-    API -.-> OTEL[OpenTelemetry/Jaeger]
-    RAG -.-> Langfuse[Langfuse Tracing]
-    RAG -.-> MLflow[MLflow Eval]
-    API -.-> Prometheus[Prometheus Metrics]
-    Prometheus --> Grafana[Grafana Dashboards]
+    Ingestion --> Splitter[LangChain Text Splitter]
+    Splitter --> Embedder[Ollama Embeddings]
+    Embedder --> Qdrant[(Qdrant Vector DB)]
+
+    API -->|POST /chat| RAG[RAG Service]
+    RAG --> EmbedQuery[Ollama Embeddings]
+    EmbedQuery --> Qdrant
+    Qdrant --> RAG
+    RAG --> LLM[Ollama LLM]
+    LLM --> API
+
+    API --> Metrics[/Prometheus Metrics/]
+    Prometheus[Prometheus] --> Metrics
+    Grafana[Grafana] --> Prometheus
+
+    API -. OTLP .-> Jaeger[Jaeger]
+    RAG -. prompt trace .-> Langfuse[Langfuse]
+    RAG -. run tracking .-> MLflow[MLflow]
+    Ingestion -. run tracking .-> MLflow
+
+    Langfuse --> Postgres[(Postgres)]
 ```
 
-## 🛠️ Stack Tecnológica
+<a id="fluxos-do-projeto"></a>
 
-| Componente | Tecnologia | Propósito |
-|------------|------------|-----------|
-| **Backend** | FastAPI | High-performance API orchestration. |
-| **Inference** | Ollama | Local serving of LLMs (Llama 3, Qwen) and Embeddings. |
-| **Vector DB** | Qdrant | Semantic search and metadata filtering. |
-| **Tracing** | Langfuse | Prompt management and detailed trace spans. |
-| **Distributed Tracing** | Jaeger | OpenTelemetry-based system-wide tracing. |
-| **Task Queue** | Redis | Asynchronous background ingestion. |
-| **Metrics** | Prometheus | Real-time monitoring and alerting. |
-| **Visualization** | Grafana | Infrastructure and LLM performance dashboards. |
-| **Evaluation** | Ragas | Systematic evaluation of RAG faithfulness and relevance. |
+## 🔄 Fluxos do Projeto
 
-## 🚀 Como Executar
+### 📥 Fluxo 1: Ingestão de Documento
 
-### Pré-requisitos
-- Docker & Docker Compose
-- Python 3.11+ (para desenvolvimento local)
+1. O usuário envia um PDF em `POST /ingest`.
+2. A API valida a extensão `.pdf`.
+3. O arquivo é salvo em `uploads/`.
+4. A API cria um job na fila Redis `ingestion_tasks`.
+5. O worker consome o job.
+6. `IngestionPipeline` carrega o PDF com `PyPDFLoader`.
+7. O texto é quebrado em chunks com `RecursiveCharacterTextSplitter`.
+8. Cada chunk vira embedding usando o modelo `nomic-embed-text` no Ollama.
+9. A coleção `llm_rag_docs` é criada no Qdrant, se ainda não existir.
+10. Os vetores e payloads são gravados no Qdrant.
+11. A execução é registrada no MLflow como run de ingestão.
 
-### Passo a Passo
+### 💬 Fluxo 2: Pergunta com RAG
 
-1. **Clonar o repositório**
-   ```bash
-   git clone https://github.com/cayoesn/llm-rag
-   cd llm-rag
-   ```
+1. O usuário envia uma pergunta em `POST /chat`.
+2. `RAGService` gera embedding da pergunta com Ollama.
+3. O Qdrant busca os chunks semanticamente mais próximos.
+4. A aplicação monta um prompt com o contexto recuperado.
+5. O Ollama gera a resposta com o modelo definido em `LLM_MODEL`.
+6. A resposta retorna junto com os documentos de contexto.
+7. A execução é registrada no MLflow e, se disponível, no Langfuse.
+8. Spans OpenTelemetry são exportados para o Jaeger.
 
-2. **Configurar o Ambiente**
-   ```bash
-   cp .env.example .env
-   # Edite o .env conforme necessário
-   ```
+<a id="tecnologias-e-servicos"></a>
 
-3. **Subir os Containers**
-   ```bash
-   make up
-   ```
+## 🧰 Tecnologias e Serviços
 
-4. **Ollama Setup**
-   Após os containers subirem, baixe os modelos:
-   ```bash
-   docker exec -it llm_rag_ollama ollama pull llama3
-   docker exec -it llm_rag_ollama ollama pull nomic-embed-text
-   ```
+| Serviço | Tecnologia | Porta | Por que foi incluído | O que verificar |
+|---|---:|---:|---|---|
+| 🌐 API | FastAPI | `8000` | Expõe os endpoints HTTP do produto e orquestra o fluxo RAG. | `/docs`, `/health`, `/metrics`, chamadas `/chat` e `/ingest`. |
+| ⚙️ Worker | RQ Worker | interno | Processa PDFs fora do request HTTP para não bloquear a API. | Logs do container `llm_rag_worker`. |
+| 📬 Fila | Redis | `6379` | Guarda jobs assíncronos de ingestão. | `redis-cli ping`, tamanho da fila e logs. |
+| 🧠 LLM local | Ollama | `11434` | Serve modelos locais de geração e embeddings. | `ollama list`, chamadas ao endpoint `/api/tags`. |
+| 🧲 Vector DB | Qdrant | `6333`, `6334` | Armazena embeddings e permite busca semântica. | Dashboard, coleção `llm_rag_docs`, pontos inseridos. |
+| 🧾 Experimentos | MLflow | `5000` | Registra runs de ingestão, chat, métricas, parâmetros e artefatos. | Experiments, runs, artifacts. |
+| 🔍 Prompt tracing | Langfuse | `3000` | Permite investigar chamadas de LLM e prompts. | Traces do projeto `LLM-RAG Project`. |
+| 📈 Métricas | Prometheus | `9090` | Coleta métricas da API e do próprio Prometheus. | Targets `UP`, queries e scrape da API. |
+| 📊 Visualização | Grafana | `3001` | Cria dashboards a partir do Prometheus. | Datasource Prometheus e painéis. |
+| 🧵 Tracing | Jaeger | `16686`, `4317`, `4318` | Visualiza spans OpenTelemetry da API e do RAG. | Service `llm_rag_api`, traces de `/chat`. |
+| 🗄️ Metadata DB | Postgres | `5432` | Banco usado pelo Langfuse. | Healthcheck e tabelas do Langfuse. |
 
-## 📊 Observabilidade & LLMOps
+<a id="estrutura-do-repositorio"></a>
 
-A plataforma vem pré-configurada com as seguintes credenciais para facilitar o primeiro acesso:
+## 📁 Estrutura do Repositório
 
-| Serviço | URL | Usuário / Email | Senha |
-|------------|-----|-----------------|-------|
-| **Langfuse** | `http://localhost:3000` | `admin@llmrag.com` | `admin123` |
-| **Grafana** | `http://localhost:3001` | `admin` | `admin` |
-| **Jaeger** | `http://localhost:16686` | *(Sem Login)* | - |
-| **MLflow** | `http://localhost:5000` | *(Sem Login)* | - |
-| **Qdrant DB** | `http://localhost:6333/dashboard` | *(Sem Login)* | - |
-| **FastAPI Docs** | `http://localhost:8000/docs` | *(Sem Login)* | - |
+```text
+api/                    FastAPI app, endpoints e métricas HTTP
+config/                 Configurações lidas do .env
+docker/                 Dockerfiles da API e do worker
+embeddings/             Cliente de embeddings via Ollama
+ingestion/              Pipeline de ingestão de PDF
+observability/          Configuração do Prometheus
+qdrant/                 Gerenciador do banco vetorial
+rag/                    Serviço RAG e template de prompt
+shared/                 Logging, MLflow e OpenTelemetry
+tests/                  Testes unitários e integração
+uploads/                PDFs recebidos pela API
+worker/                 Worker RQ que processa ingestão
+docker-compose.yml      Stack completa local
+Makefile                Comandos de operação
+requirements.txt        Dependências Python
+```
 
-> **Nota:** As chaves de API do Langfuse já foram geradas automaticamente e injetadas no serviço da API. Você pode começar a testar e os traces aparecerão instantaneamente.
+<a id="instalacao"></a>
 
-## 🔌 Rotas da API
+## 🚀 Instalação
 
-A API FastAPI fornece os seguintes endpoints para interação:
+### 📋 Pré-requisitos
 
-### 1. **GET /health** - Health Check
-Verifica se a API está rodando e saudável.
+- Docker e Docker Compose
+- Python 3.11+ para desenvolvimento local
+- `make` opcional, mas recomendado
 
-**Request:**
+No Windows, os comandos abaixo podem ser executados no PowerShell. Se não tiver `make`, use os comandos `docker compose` equivalentes.
+
+### 1. 🧩 Configurar ambiente
+
+```bash
+cp .env.example .env
+```
+
+Revise o `.env`. Para uso via Docker, os hosts internos devem apontar para os nomes dos serviços:
+
+```env
+OLLAMA_BASE_URL="http://ollama:11434"
+QDRANT_HOST="qdrant"
+REDIS_HOST="redis"
+MLFLOW_TRACKING_URI="http://mlflow:5000"
+OTEL_EXPORTER_OTLP_ENDPOINT="http://jaeger:4317"
+LANGFUSE_HOST="http://langfuse:3000"
+```
+
+### 2. 🐳 Subir a stack
+
+```bash
+make up
+```
+
+Equivalente:
+
+```bash
+docker compose up -d --build
+```
+
+### 3. 🧠 Baixar modelos no Ollama
+
+Depois que o container `llm_rag_ollama` estiver saudável:
+
+```bash
+docker exec -it llm_rag_ollama ollama pull llama3
+docker exec -it llm_rag_ollama ollama pull nomic-embed-text
+```
+
+Verifique:
+
+```bash
+docker exec -it llm_rag_ollama ollama list
+```
+
+### 4. ✅ Verificar containers
+
+```bash
+docker compose ps
+```
+
+Todos os serviços principais devem estar `running` ou `healthy`.
+
+<a id="como-usar"></a>
+
+## 🧪 Como Usar
+
+### 🩺 Health check
+
 ```bash
 curl http://localhost:8000/health
 ```
 
-**Response (200 OK):**
+Resposta esperada:
+
+```json
+{"status":"healthy"}
+```
+
+### 📖 Documentação interativa da API
+
+Acesse:
+
+```text
+http://localhost:8000/docs
+```
+
+### 📥 Ingerir um PDF
+
+```bash
+curl -X POST http://localhost:8000/ingest \
+  -F "file=@documento.pdf"
+```
+
+Resposta esperada:
+
 ```json
 {
-  "status": "healthy"
+  "message": "File uploaded and ingestion started",
+  "job_id": "job-id",
+  "file_id": "uuid"
 }
 ```
 
----
+O processamento é assíncrono. Para acompanhar:
 
-### 2. **POST /chat** - Chat com RAG
-Envia uma pergunta e recebe uma resposta gerada pelo RAG com contexto recuperado.
+```bash
+docker logs -f llm_rag_worker
+docker logs -f llm_rag_api
+```
 
-**Request:**
+### 💬 Fazer uma pergunta
+
 ```bash
 curl -X POST http://localhost:8000/chat \
   -H "Content-Type: application/json" \
-  -d '{
-    "message": "O que é retrieval augmented generation?"
-  }'
+  -d "{\"message\":\"O que o documento fala sobre RAG?\"}"
 ```
 
-**Request Body (JSON):**
-```json
-{
-  "message": "Sua pergunta aqui"
-}
-```
+Resposta esperada:
 
-**Response (200 OK):**
 ```json
 {
-  "answer": "Retrieval Augmented Generation (RAG) é uma técnica que combina...",
+  "answer": "Resposta gerada pelo LLM...",
   "context": [
     {
-      "id": "doc_1",
-      "content": "RAG é um padrão arquitetural que...",
+      "id": "point-id",
+      "content": "chunk recuperado...",
       "metadata": {
         "source": "documento.pdf",
         "page": 1
-      }
-    },
-    {
-      "id": "doc_2",
-      "content": "A retrieval augmented generation melhora a qualidade...",
-      "metadata": {
-        "source": "outro_documento.pdf",
-        "page": 3
       }
     }
   ],
@@ -151,105 +286,481 @@ curl -X POST http://localhost:8000/chat \
 }
 ```
 
-**Python Example:**
-```python
-import requests
+<a id="como-verificar-cada-servico"></a>
 
-url = "http://localhost:8000/chat"
-payload = {"message": "O que é RAG?"}
-response = requests.post(url, json=payload)
-print(response.json())
-```
+## 🔎 Como Verificar Cada Serviço
 
----
+### 🌐 FastAPI
 
-### 3. **POST /ingest** - Upload e Indexação de PDF
-Faz upload de um arquivo PDF para ser processado e indexado de forma assíncrona.
+Use a API para validar se a aplicação está respondendo:
 
-**Request:**
 ```bash
-curl -X POST http://localhost:8000/ingest \
-  -F "file=@seu_documento.pdf"
+curl http://localhost:8000/health
+curl http://localhost:8000/metrics
 ```
 
-**Response (200 OK):**
-```json
-{
-  "message": "File uploaded and ingestion started",
-  "job_id": "550e8400-e29b-41d4-a716-446655440000",
-  "file_id": "abc123def456"
-}
+Abra a documentação:
+
+```text
+http://localhost:8000/docs
 ```
 
-**Python Example:**
-```python
-import requests
+O que observar:
 
-url = "http://localhost:8000/ingest"
-with open("documento.pdf", "rb") as f:
-    files = {"file": f}
-    response = requests.post(url, files=files)
-    print(response.json())
-```
+- `GET /health` retorna `healthy`;
+- `POST /ingest` aceita apenas PDF;
+- `POST /chat` retorna `answer`, `context` e `model`;
+- `GET /metrics` expõe métricas para o Prometheus.
 
-**Shell Script Example (Linux/macOS):**
+### ⚙️ Worker
+
+O worker executa `worker/main.py` e consome a fila Redis `ingestion_tasks`.
+
+Ver logs:
+
 ```bash
-#!/bin/bash
-
-PDF_FILE="documento.pdf"
-
-# Upload do PDF
-RESPONSE=$(curl -s -X POST http://localhost:8000/ingest \
-  -F "file=@$PDF_FILE")
-
-# Extrair job_id
-JOB_ID=$(echo $RESPONSE | grep -o '"job_id":"[^"]*' | cut -d'"' -f4)
-
-echo "Upload concluído!"
-echo "Job ID: $JOB_ID"
-echo "Status: $RESPONSE"
-
-# (Opcional) Monitorar progresso
-sleep 2
-echo "Processamento em segundo plano. Use /health para confirmar que a API está ativa."
+docker logs -f llm_rag_worker
 ```
 
-**Notas sobre /ingest:**
-- ✅ Apenas arquivos PDF são aceitos
-- ✅ Processamento é assíncrono (a resposta é imediata, indexação ocorre em background)
-- ✅ Arquivos grandes podem levar alguns minutos para processar
-- ✅ Embeddings e contextos são armazenados no Qdrant após processamento
-- ✅ O `job_id` pode ser usado para rastrear o status da tarefa no Redis
+O que observar depois de um upload:
 
----
+- mensagem de início do processamento;
+- split do PDF em chunks;
+- upsert no Qdrant;
+- logs de sucesso ou erro.
 
-## 📚 Estrutura de Resposta - /chat
+### 📬 Redis
 
-| Campo | Tipo | Descrição |
-|-------|------|-----------|
-| `answer` | string | Resposta gerada pelo LLM baseada no contexto |
-| `context` | array | Lista de documentos recuperados do Qdrant |
-| `model` | string | Nome do modelo LLM utilizado (ex: "llama3") |
+Redis é usado como broker da fila RQ.
 
-**Estrutura de um documento no context:**
-```json
-{
-  "id": "unique_doc_id",
-  "content": "Texto do documento...",
-  "metadata": {
-    "source": "nome_do_arquivo.pdf",
-    "page": 1,
-    "chunk": 0
-  }
-}
+Verificar conexão:
+
+```bash
+docker exec -it llm_rag_redis redis-cli ping
 ```
 
----
+Resposta esperada:
 
-## 🧪 Conceitos de LLMOps Aplicados
+```text
+PONG
+```
 
-- **Semantic Caching**: Redução de latência usando Redis para queries similares.
-- **Async Ingestion**: Workers independentes para processamento de PDFs pesados.
-- **Structured Logging**: Logs em JSON para fácil integração com ELK/Loki.
-- **Retry Logic**: Resiliência em chamadas de API usando Tenacity.
-- **RAG Evaluation**: Métricas de Faithfulness e Answer Relevance com Ragas.
+Verificar fila:
+
+```bash
+docker exec -it llm_rag_redis redis-cli LLEN rq:queue:ingestion_tasks
+```
+
+Durante processamento, a fila pode subir e depois voltar para `0`.
+
+### 🧠 Ollama
+
+Ollama serve dois tipos de modelo:
+
+- `LLM_MODEL`: geração de resposta, por padrão `llama3`;
+- `EMBEDDING_MODEL`: embeddings, por padrão `nomic-embed-text`.
+
+Verificar modelos instalados:
+
+```bash
+docker exec -it llm_rag_ollama ollama list
+```
+
+Testar geração:
+
+```bash
+docker exec -it llm_rag_ollama ollama run llama3 "Resuma RAG em uma frase"
+```
+
+Testar API:
+
+```bash
+curl http://localhost:11434/api/tags
+```
+
+### 🧲 Qdrant Dashboard
+
+Acesse:
+
+```text
+http://localhost:6333/dashboard
+```
+
+O que verificar:
+
+- coleção `llm_rag_docs`;
+- quantidade de pontos após uma ingestão;
+- payloads com `content`, `metadata` e `chunk_index`;
+- dimensão dos vetores compatível com o modelo de embedding.
+
+Verificar via API:
+
+```bash
+curl http://localhost:6333/collections
+```
+
+Após ingerir documentos, a coleção esperada é:
+
+```text
+llm_rag_docs
+```
+
+### 🧾 MLflow
+
+Acesse:
+
+```text
+http://localhost:5000
+```
+
+MLflow registra runs de:
+
+- queries RAG (`log_rag_run`);
+- ingestão de documentos (`log_ingestion_run`);
+- avaliações e métricas customizadas, quando chamadas pelo código.
+
+O que verificar:
+
+- experimento `Default`, caso nenhum experimento seja setado explicitamente;
+- runs com nomes como `rag_query_...` e `ingest_...`;
+- parâmetros como `question`, `model`, `context_count`, `file_name`;
+- métricas como `latency_seconds`, `context_retrieved`, `pages_processed`, `chunks_created`;
+- artefatos como `rag_output`, `metadata` e `ingestion_stats`.
+
+Fluxo recomendado para validar:
+
+1. Faça upload de um PDF.
+2. Faça uma chamada `/chat`.
+3. Abra o MLflow.
+4. Entre no experimento `Default`.
+5. Confira as runs criadas e seus artefatos.
+
+### 🔍 Langfuse
+
+Acesse:
+
+```text
+http://localhost:3000
+```
+
+Credenciais padrão:
+
+```text
+Email: admin@llmrag.com
+Senha: admin123
+```
+
+Projeto inicial:
+
+```text
+LLM-RAG Project
+```
+
+Chaves configuradas no `.env`:
+
+```env
+LANGFUSE_PUBLIC_KEY="pk-lf-llmrag"
+LANGFUSE_SECRET_KEY="sk-lf-llmrag"
+```
+
+O que verificar:
+
+- se o login funciona;
+- se o projeto inicial existe;
+- se novas chamadas `/chat` aparecem como traces.
+
+Nota: o código tenta usar a API disponível do SDK do Langfuse. Se a versão instalada não expuser o método esperado, a aplicação desativa o tracing de prompt e registra warning em log sem quebrar o `/chat`.
+
+### 🧵 Jaeger
+
+Acesse:
+
+```text
+http://localhost:16686
+```
+
+O que verificar:
+
+1. Em `Service`, selecione `llm_rag_api`.
+2. Clique em `Find Traces`.
+3. Execute chamadas `/health`, `/ingest` ou `/chat`.
+4. Confira spans HTTP e spans internos como `rag_answer_question`, `retrieval` e `generation`.
+
+Jaeger recebe spans via OTLP gRPC:
+
+```env
+OTEL_EXPORTER_OTLP_ENDPOINT="http://jaeger:4317"
+```
+
+Se aparecer warning de exportação OTEL nos testes locais, normalmente significa que o Jaeger não está rodando naquele momento.
+
+### 📈 Prometheus
+
+Acesse:
+
+```text
+http://localhost:9090
+```
+
+O Prometheus está configurado em:
+
+```text
+observability/prometheus/prometheus.yml
+```
+
+Targets configurados:
+
+- `prometheus`;
+- `llm_rag_api` em `api:8000/metrics`.
+
+O que verificar:
+
+1. Abra `Status > Targets`.
+2. Confirme que `llm_rag_api` está `UP`.
+3. Execute queries como:
+
+```promql
+up
+process_cpu_seconds_total
+python_gc_objects_collected_total
+```
+
+Também é possível validar a origem diretamente:
+
+```bash
+curl http://localhost:8000/metrics
+```
+
+### 📊 Grafana
+
+Acesse:
+
+```text
+http://localhost:3001
+```
+
+Credenciais padrão:
+
+```text
+Usuário: admin
+Senha: admin
+```
+
+Este repositório sobe o Grafana, mas ainda não provisiona datasource e dashboards automaticamente. Para verificar manualmente:
+
+1. Acesse `Connections > Data sources`.
+2. Adicione `Prometheus`.
+3. Use a URL interna:
+
+```text
+http://prometheus:9090
+```
+
+4. Clique em `Save & test`.
+5. Crie um dashboard em `Dashboards > New`.
+
+Sugestões de painéis:
+
+| Painel | Query PromQL | Objetivo |
+|---|---|---|
+| Serviços ativos | `up` | Ver quais targets estão saudáveis. |
+| CPU Python/API | `rate(process_cpu_seconds_total[5m])` | Observar consumo da aplicação. |
+| Objetos GC | `rate(python_gc_objects_collected_total[5m])` | Sinal básico de atividade do runtime Python. |
+| Scrape duration | `scrape_duration_seconds` | Ver latência de coleta do Prometheus. |
+
+Para um case mais completo, o próximo passo natural é provisionar dashboards em `docker-compose` ou em `observability/grafana/`.
+
+### 🗄️ Postgres
+
+Postgres é usado pelo Langfuse como banco de metadata.
+
+Verificar saúde:
+
+```bash
+docker exec -it llm_rag_postgres pg_isready -U postgres
+```
+
+Conectar:
+
+```bash
+docker exec -it llm_rag_postgres psql -U postgres -d llm_rag_db
+```
+
+Listar tabelas:
+
+```sql
+\dt
+```
+
+<a id="observabilidade"></a>
+
+## 📊 Observabilidade
+
+### 🧭 Onde olhar cada problema
+
+| Problema | Primeiro lugar para olhar | Depois verificar |
+|---|---|---|
+| API fora do ar | `docker logs llm_rag_api` | FastAPI `/health`, Compose health. |
+| PDF não indexa | `docker logs llm_rag_worker` | Redis queue, Qdrant collection, Ollama embeddings. |
+| Chat sem contexto | Qdrant Dashboard | Se a coleção tem pontos e payload `content`. |
+| Resposta lenta | Jaeger | Spans `retrieval` e `generation`. |
+| LLM não responde | Ollama logs | Modelos instalados e endpoint `11434`. |
+| Runs não aparecem | MLflow UI | `MLFLOW_TRACKING_URI` no `.env`. |
+| Métricas não aparecem | Prometheus Targets | `/metrics` na API. |
+| Dashboard vazio | Grafana datasource | URL interna `http://prometheus:9090`. |
+
+### 🪵 Logs úteis
+
+```bash
+docker logs -f llm_rag_api
+docker logs -f llm_rag_worker
+docker logs -f llm_rag_ollama
+docker logs -f llm_rag_qdrant
+docker logs -f llm_rag_mlflow
+```
+
+### ⚡ Comandos gerais
+
+```bash
+make up          # sobe a stack
+make down        # para a stack
+make restart     # reinicia serviços
+make ps          # lista containers
+make logs        # segue logs do compose
+make test        # roda testes com coverage >= 80%
+```
+
+<a id="testes-e-coverage"></a>
+
+## ✅ Testes e Coverage
+
+Instalar dependências localmente:
+
+```bash
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.txt
+```
+
+Rodar testes:
+
+```bash
+make test
+```
+
+Ou diretamente:
+
+```bash
+.venv/Scripts/python -m pytest --cov=. --cov-report=term-missing --cov-fail-under=80
+```
+
+Configuração de coverage:
+
+```text
+.coveragerc
+```
+
+O projeto exige cobertura mínima de 80%. A configuração atual ignora `tests/` e `.venv/` para medir apenas código da aplicação.
+
+## 🔐 Variáveis de Ambiente Principais
+
+| Variável | Exemplo | Uso |
+|---|---|---|
+| `APP_NAME` | `LLM-RAG Platform` | Nome da aplicação FastAPI. |
+| `OLLAMA_BASE_URL` | `http://ollama:11434` | URL interna do Ollama no Docker. |
+| `LLM_MODEL` | `llama3` | Modelo de geração. |
+| `EMBEDDING_MODEL` | `nomic-embed-text` | Modelo de embeddings. |
+| `QDRANT_HOST` | `qdrant` | Host do Qdrant no Docker. |
+| `QDRANT_COLLECTION_NAME` | `llm_rag_docs` | Coleção vetorial usada pelo RAG. |
+| `REDIS_QUEUE_NAME` | `ingestion_tasks` | Nome da fila de ingestão. |
+| `MLFLOW_TRACKING_URI` | `http://mlflow:5000` | Tracking server do MLflow. |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | `http://jaeger:4317` | Exportador OTLP para Jaeger. |
+| `LANGFUSE_HOST` | `http://langfuse:3000` | Host do Langfuse. |
+
+<a id="troubleshooting"></a>
+
+## 🛠️ Troubleshooting
+
+### 🧠 `POST /chat` falha porque o modelo não existe
+
+Baixe os modelos:
+
+```bash
+docker exec -it llm_rag_ollama ollama pull llama3
+docker exec -it llm_rag_ollama ollama pull nomic-embed-text
+```
+
+### 🧲 Qdrant não mostra coleção
+
+Ingestão ainda não rodou ou falhou. Verifique:
+
+```bash
+docker logs -f llm_rag_worker
+curl http://localhost:6333/collections
+```
+
+### 📈 Prometheus target `llm_rag_api` está DOWN
+
+Verifique se a API está ativa:
+
+```bash
+curl http://localhost:8000/metrics
+docker compose ps api
+```
+
+Se a API estiver fora, veja:
+
+```bash
+docker logs llm_rag_api
+```
+
+### 📊 Grafana não conecta no Prometheus
+
+Use a URL interna do Docker, não `localhost`:
+
+```text
+http://prometheus:9090
+```
+
+Dentro do container Grafana, `localhost` aponta para o próprio Grafana.
+
+### 🧾 MLflow não mostra runs
+
+Gere atividade primeiro:
+
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"message\":\"Teste de MLflow\"}"
+```
+
+Depois abra:
+
+```text
+http://localhost:5000
+```
+
+Procure no experimento `Default`.
+
+### ⚙️ Worker não processa PDF
+
+Verifique Redis, worker e uploads:
+
+```bash
+docker exec -it llm_rag_redis redis-cli ping
+docker logs -f llm_rag_worker
+docker exec -it llm_rag_worker ls -la /app/uploads
+```
+
+### 🧵 Warning de Jaeger/OTEL em execução local
+
+Esse warning costuma aparecer quando a aplicação roda fora do Docker ou quando o Jaeger ainda não está pronto:
+
+```text
+Failed to export traces to jaeger:4317
+```
+
+Se estiver rodando localmente fora do Compose, ajuste:
+
+```env
+OTEL_EXPORTER_OTLP_ENDPOINT="http://localhost:4317"
+```
