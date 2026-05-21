@@ -1,4 +1,5 @@
 import ollama
+import time
 from typing import Dict, Any
 from langfuse import Langfuse
 from embeddings.ollama_client import OllamaEmbedder
@@ -6,6 +7,7 @@ from qdrant.manager import QdrantManager
 from config.settings import settings
 from shared.logging import logger
 from shared.otel import tracer
+from shared.mlflow_logger import log_rag_run
 
 class RAGService:
     def __init__(self):
@@ -31,6 +33,8 @@ class RAGService:
                 logger.warning(f"Failed to initialize Langfuse: {e}, tracing disabled")
 
     def answer_question(self, question: str) -> Dict[str, Any]:
+        start_time = time.time()
+        
         with tracer.start_as_current_span("rag_answer_question") as span:
             span.set_attribute("question", question)
             logger.info("Answering question", question=question)
@@ -51,6 +55,9 @@ class RAGService:
                 prompt = prompt_from_template(context_text, question)
                 response = self.ollama_client.generate(model=self.model, prompt=prompt)
             
+            latency = time.time() - start_time
+            
+            # Log to Langfuse if available
             if self.langfuse:
                 try:
                     if hasattr(self.langfuse, "observe"):
@@ -65,41 +72,17 @@ class RAGService:
                 except Exception as e:
                     logger.warning(f"Failed to log to Langfuse: {e}")
             
-            return {
-                "answer": response["response"],
-                "context": context_docs,
-                "model": self.model
-            }
-
-    def answer_question(self, question: str) -> Dict[str, Any]:
-        with tracer.start_as_current_span("rag_answer_question") as span:
-            span.set_attribute("question", question)
-            logger.info("Answering question", question=question)
-            
-            # 1. Retrieval
-            with tracer.start_as_current_span("retrieval"):
-                query_vector = self.embedder.embed_query(question)
-                context_docs = self.qdrant.search(query_vector, limit=3)
-            
-            context_text = "\n\n".join([doc["content"] for doc in context_docs])
-            
-            # 2. Generation
-            with tracer.start_as_current_span("generation"):
-                prompt = prompt_from_template(context_text, question)
-                response = self.ollama_client.generate(model=self.model, prompt=prompt)
-            
-            # Log to Langfuse if available
-            if self.langfuse:
-                try:
-                    # Use Langfuse SDK observation method
-                    self.langfuse.observe(
-                        name="rag-query",
-                        input={"question": question},
-                        output={"answer": response["response"]},
-                        model=self.model
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to log to Langfuse: {e}")
+            # Log to MLflow
+            try:
+                log_rag_run(
+                    question=question,
+                    answer=response["response"],
+                    context_count=len(context_docs),
+                    model=self.model,
+                    latency_seconds=latency
+                )
+            except Exception as e:
+                logger.warning(f"Failed to log to MLflow: {e}")
             
             return {
                 "answer": response["response"],
