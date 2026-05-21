@@ -85,6 +85,167 @@ A plataforma vem pré-configurada com as seguintes credenciais para facilitar o 
 
 > **Nota:** As chaves de API do Langfuse já foram geradas automaticamente e injetadas no serviço da API. Você pode começar a testar e os traces aparecerão instantaneamente.
 
+## 🔌 Rotas da API
+
+A API FastAPI fornece os seguintes endpoints para interação:
+
+### 1. **GET /health** - Health Check
+Verifica se a API está rodando e saudável.
+
+**Request:**
+```bash
+curl http://localhost:8000/health
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "healthy"
+}
+```
+
+---
+
+### 2. **POST /chat** - Chat com RAG
+Envia uma pergunta e recebe uma resposta gerada pelo RAG com contexto recuperado.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "O que é retrieval augmented generation?"
+  }'
+```
+
+**Request Body (JSON):**
+```json
+{
+  "message": "Sua pergunta aqui"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "answer": "Retrieval Augmented Generation (RAG) é uma técnica que combina...",
+  "context": [
+    {
+      "id": "doc_1",
+      "content": "RAG é um padrão arquitetural que...",
+      "metadata": {
+        "source": "documento.pdf",
+        "page": 1
+      }
+    },
+    {
+      "id": "doc_2",
+      "content": "A retrieval augmented generation melhora a qualidade...",
+      "metadata": {
+        "source": "outro_documento.pdf",
+        "page": 3
+      }
+    }
+  ],
+  "model": "llama3"
+}
+```
+
+**Python Example:**
+```python
+import requests
+
+url = "http://localhost:8000/chat"
+payload = {"message": "O que é RAG?"}
+response = requests.post(url, json=payload)
+print(response.json())
+```
+
+---
+
+### 3. **POST /ingest** - Upload e Indexação de PDF
+Faz upload de um arquivo PDF para ser processado e indexado de forma assíncrona.
+
+**Request:**
+```bash
+curl -X POST http://localhost:8000/ingest \
+  -F "file=@seu_documento.pdf"
+```
+
+**Response (200 OK):**
+```json
+{
+  "message": "File uploaded and ingestion started",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "file_id": "abc123def456"
+}
+```
+
+**Python Example:**
+```python
+import requests
+
+url = "http://localhost:8000/ingest"
+with open("documento.pdf", "rb") as f:
+    files = {"file": f}
+    response = requests.post(url, files=files)
+    print(response.json())
+```
+
+**Shell Script Example (Linux/macOS):**
+```bash
+#!/bin/bash
+
+PDF_FILE="documento.pdf"
+
+# Upload do PDF
+RESPONSE=$(curl -s -X POST http://localhost:8000/ingest \
+  -F "file=@$PDF_FILE")
+
+# Extrair job_id
+JOB_ID=$(echo $RESPONSE | grep -o '"job_id":"[^"]*' | cut -d'"' -f4)
+
+echo "Upload concluído!"
+echo "Job ID: $JOB_ID"
+echo "Status: $RESPONSE"
+
+# (Opcional) Monitorar progresso
+sleep 2
+echo "Processamento em segundo plano. Use /health para confirmar que a API está ativa."
+```
+
+**Notas sobre /ingest:**
+- ✅ Apenas arquivos PDF são aceitos
+- ✅ Processamento é assíncrono (a resposta é imediata, indexação ocorre em background)
+- ✅ Arquivos grandes podem levar alguns minutos para processar
+- ✅ Embeddings e contextos são armazenados no Qdrant após processamento
+- ✅ O `job_id` pode ser usado para rastrear o status da tarefa no Redis
+
+---
+
+## 📚 Estrutura de Resposta - /chat
+
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `answer` | string | Resposta gerada pelo LLM baseada no contexto |
+| `context` | array | Lista de documentos recuperados do Qdrant |
+| `model` | string | Nome do modelo LLM utilizado (ex: "llama3") |
+
+**Estrutura de um documento no context:**
+```json
+{
+  "id": "unique_doc_id",
+  "content": "Texto do documento...",
+  "metadata": {
+    "source": "nome_do_arquivo.pdf",
+    "page": 1,
+    "chunk": 0
+  }
+}
+```
+
+---
+
 ## 🧪 Conceitos de LLMOps Aplicados
 
 - **Semantic Caching**: Redução de latência usando Redis para queries similares.

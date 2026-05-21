@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from typing import List, Optional
 import shutil
@@ -6,6 +7,7 @@ import os
 import uuid
 from redis import Redis
 from rq import Queue
+from prometheus_client import Counter, Histogram, generate_latest
 from config.settings import settings
 from shared.logging import logger, setup_logging
 from rag.service import RAGService
@@ -18,6 +20,12 @@ app = FastAPI(title=settings.APP_NAME)
 # Instrumentation
 from shared.otel import setup_otel
 setup_otel(app)
+
+# Prometheus Metrics
+chat_requests = Counter('chat_requests_total', 'Total chat requests', ['status'])
+chat_latency = Histogram('chat_latency_seconds', 'Chat request latency')
+ingest_requests = Counter('ingest_requests_total', 'Total ingest requests', ['status'])
+ingest_latency = Histogram('ingest_latency_seconds', 'Ingest request latency')
 
 # Services
 rag_service = RAGService()
@@ -36,6 +44,11 @@ class ChatResponse(BaseModel):
 @app.get("/health")
 def health():
     return {"status": "healthy"}
+
+@app.get("/metrics")
+def metrics():
+    """Prometheus metrics endpoint"""
+    return PlainTextResponse(generate_latest())
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):

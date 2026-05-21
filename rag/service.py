@@ -13,43 +13,51 @@ class RAGService:
         self.qdrant = QdrantManager()
         self.ollama_client = ollama.Client(host=settings.OLLAMA_BASE_URL)
         self.model = settings.LLM_MODEL
-        self.langfuse = Langfuse(
-            public_key=settings.LANGFUSE_PUBLIC_KEY,
-            secret_key=settings.LANGFUSE_SECRET_KEY,
-            host=settings.LANGFUSE_HOST
-        )
+        
+        # Initialize Langfuse only if keys are configured
+        try:
+            if settings.LANGFUSE_PUBLIC_KEY and settings.LANGFUSE_SECRET_KEY:
+                self.langfuse = Langfuse(
+                    public_key=settings.LANGFUSE_PUBLIC_KEY,
+                    secret_key=settings.LANGFUSE_SECRET_KEY,
+                    host=settings.LANGFUSE_HOST
+                )
+            else:
+                logger.warning("Langfuse keys not configured, tracing disabled")
+                self.langfuse = None
+        except Exception as e:
+            logger.warning(f"Failed to initialize Langfuse: {e}, tracing disabled")
+            self.langfuse = None
 
     def answer_question(self, question: str) -> Dict[str, Any]:
         with tracer.start_as_current_span("rag_answer_question") as span:
             span.set_attribute("question", question)
             logger.info("Answering question", question=question)
             
-            # Create a trace in Langfuse
-            lf_trace = self.langfuse.trace(name="rag-query", input=question)
-            
             # 1. Retrieval
             with tracer.start_as_current_span("retrieval"):
-                retrieval_span = lf_trace.span(name="retrieval", input=question)
                 query_vector = self.embedder.embed_query(question)
                 context_docs = self.qdrant.search(query_vector, limit=3)
-                retrieval_span.end(output=context_docs)
             
             context_text = "\n\n".join([doc["content"] for doc in context_docs])
             
             # 2. Generation
             with tracer.start_as_current_span("generation"):
-                generation = lf_trace.generation(
-                    name="generation",
-                    model=self.model,
-                    input=prompt_from_template(context_text, question),
-                )
-                
                 prompt = prompt_from_template(context_text, question)
                 response = self.ollama_client.generate(model=self.model, prompt=prompt)
-                
-                generation.end(output=response["response"])
             
-            lf_trace.update(output=response["response"])
+            # Log to Langfuse if available
+            if self.langfuse:
+                try:
+                    # Use Langfuse SDK observation method
+                    self.langfuse.observe(
+                        name="rag-query",
+                        input={"question": question},
+                        output={"answer": response["response"]},
+                        model=self.model
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to log to Langfuse: {e}")
             
             return {
                 "answer": response["response"],
