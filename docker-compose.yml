@@ -109,7 +109,11 @@ services:
       - "5000:5000"
     environment:
       - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow.db
-    command: mlflow server --host 0.0.0.0 --port 5000
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --allowed-hosts "mlflow:5000,localhost:*,127.0.0.1:*"
     volumes:
       - mlflow_data:/mlflow
     networks:
