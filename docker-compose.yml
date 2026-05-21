@@ -1,0 +1,182 @@
+services:
+  # LLM Inference Engine
+  ollama:
+    image: ollama/ollama:latest
+    container_name: llm_rag_ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - llm_rag_network
+
+  # Vector Database
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: llm_rag_qdrant
+    environment:
+      - QDRANT__SERVICE__ENABLE_STATIC_CONTENT=true
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - llm_rag_network
+
+  # Cache & Task Queue
+  redis:
+    image: redis:7-alpine
+    container_name: llm_rag_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - llm_rag_network
+
+  # Metadata Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: llm_rag_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-llm_rag_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - llm_rag_network
+
+  # --- Observability Stack ---
+
+  # Prompt Tracing
+  langfuse:
+    image: langfuse/langfuse:latest
+    container_name: llm_rag_langfuse
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-llm_rag_db}
+      - NEXTAUTH_SECRET=mysecret
+      - NEXTAUTH_URL=http://localhost:3000
+      - TELEMETRY_ENABLED=false
+    ports:
+      - "3000:3000"
+    networks:
+      - llm_rag_network
+
+  # Experiment Tracking
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:latest
+    container_name: llm_rag_mlflow
+    ports:
+      - "5000:5000"
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow.db
+    volumes:
+      - mlflow_data:/mlflow
+    networks:
+      - llm_rag_network
+
+  # Distributed Tracing (Jaeger)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: llm_rag_jaeger
+    ports:
+      - "16686:16686" # UI
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+    networks:
+      - llm_rag_network
+
+  # Metrics (Prometheus)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: llm_rag_prometheus
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - llm_rag_network
+
+  # Visualization (Grafana)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: llm_rag_grafana
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    networks:
+      - llm_rag_network
+
+  # API Service
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: llm_rag_api
+    env_file: .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      ollama:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - llm_rag_network
+
+  # Worker Service
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: llm_rag_worker
+    env_file: .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - llm_rag_network
+
+networks:
+  llm_rag_network:
+    driver: bridge
+
+volumes:
+  ollama_data:
+  qdrant_data:
+  redis_data:
+  postgres_data:
+  mlflow_data:
+  grafana_data:
