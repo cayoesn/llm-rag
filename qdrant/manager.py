@@ -55,14 +55,19 @@ class QdrantManager:
             return []
             
         try:
-            results = self.client.search(
+            results = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=vector,
+                query=vector,
                 limit=limit,
-                with_payload=True
+                with_payload=True,
             )
-            logger.info("Search completed", results_count=len(results))
-            return [{"id": res.id, "content": res.payload.get("content", ""), "metadata": res.payload.get("metadata", {})} for res in results]
+            hits = results.points
+            logger.info("Search completed", results_count=len(hits))
+            return [{
+                "id": hit.id,
+                "content": hit.payload.get("content", ""),
+                "metadata": hit.payload.get("metadata", {}),
+            } for hit in hits]
         except Exception as e:
             logger.error("Search failed", error=str(e))
             return []

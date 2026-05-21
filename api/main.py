@@ -75,10 +75,10 @@ async def ingest_file(file: UploadFile = File(...)):
     # Enqueue background task
     job = q.enqueue(process_ingestion_task, file_path)
     
-    logger.info("Ingestion task enqueued", job_id=job.get_id(), file=file.filename)
+    logger.info("Ingestion task enqueued", job_id=job.id, file=file.filename)
     
     return {
         "message": "File uploaded and ingestion started",
-        "job_id": job.get_id(),
+        "job_id": job.id,
         "file_id": file_id
     }
