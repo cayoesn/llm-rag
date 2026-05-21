@@ -72,10 +72,18 @@ graph TD
 
 ## 📊 Observabilidade & LLMOps
 
-- **Langfuse**: Acesse em `http://localhost:3000` para ver traces de prompts.
-- **Jaeger**: Acesse em `http://localhost:16686` para tracing distribuído.
-- **MLflow**: Acesse em `http://localhost:5000` para tracking de experimentos.
-- **Grafana**: Acesse em `http://localhost:3001` (admin/admin).
+A plataforma vem pré-configurada com as seguintes credenciais para facilitar o primeiro acesso:
+
+| Serviço | URL | Usuário / Email | Senha |
+|------------|-----|-----------------|-------|
+| **Langfuse** | `http://localhost:3000` | `admin@llmrag.com` | `admin123` |
+| **Grafana** | `http://localhost:3001` | `admin` | `admin` |
+| **Jaeger** | `http://localhost:16686` | *(Sem Login)* | - |
+| **MLflow** | `http://localhost:5000` | *(Sem Login)* | - |
+| **Qdrant DB** | `http://localhost:6333/dashboard` | *(Sem Login)* | - |
+| **FastAPI Docs** | `http://localhost:8000/docs` | *(Sem Login)* | - |
+
+> **Nota:** As chaves de API do Langfuse já foram geradas automaticamente e injetadas no serviço da API. Você pode começar a testar e os traces aparecerão instantaneamente.
 
 ## 🧪 Conceitos de LLMOps Aplicados
 

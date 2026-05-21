@@ -83,7 +83,19 @@ services:
       - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-llm_rag_db}
       - NEXTAUTH_SECRET=mysecret
       - NEXTAUTH_URL=http://localhost:3000
+      - SALT=mysalt
+      - ENCRYPTION_KEY=0000000000000000000000000000000000000000000000000000000000000000
       - TELEMETRY_ENABLED=false
+      # Headless Bootstrap
+      - LANGFUSE_INIT_USER_EMAIL=admin@llmrag.com
+      - LANGFUSE_INIT_USER_PASSWORD=admin123
+      - LANGFUSE_INIT_ORG_ID=llmrag-org
+      - LANGFUSE_INIT_ORG_NAME=LLM-RAG Organization
+      - LANGFUSE_INIT_PROJECT_ID=llmrag-project
+      - LANGFUSE_INIT_PROJECT_NAME=LLM-RAG Project
+      - LANGFUSE_INIT_PROJECT_PUBLIC_KEY=pk-lf-llmrag
+      - LANGFUSE_INIT_PROJECT_SECRET_KEY=sk-lf-llmrag
+      - LANGFUSE_DISABLE_SIGNUP=true
     ports:
       - "3000:3000"
     networks:
