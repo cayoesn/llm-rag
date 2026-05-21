@@ -27,7 +27,7 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/6333; printf 'GET /healthz HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3; grep -q '200 OK' <&3"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -74,7 +74,7 @@ services:
 
   # Prompt Tracing
   langfuse:
-    image: langfuse/langfuse:latest
+    image: langfuse/langfuse:2
     container_name: llm_rag_langfuse
     depends_on:
       postgres:
@@ -97,6 +97,7 @@ services:
       - "5000:5000"
     environment:
       - MLFLOW_BACKEND_STORE_URI=sqlite:///mlflow.db
+    command: mlflow server --host 0.0.0.0 --port 5000
     volumes:
       - mlflow_data:/mlflow
     networks:
@@ -144,6 +145,8 @@ services:
       dockerfile: docker/Dockerfile.api
     container_name: llm_rag_api
     env_file: .env
+    environment:
+      - PYTHONPATH=/app
     ports:
       - "8000:8000"
     depends_on:
@@ -163,6 +166,8 @@ services:
       dockerfile: docker/Dockerfile.worker
     container_name: llm_rag_worker
     env_file: .env
+    environment:
+      - PYTHONPATH=/app
     depends_on:
       redis:
         condition: service_healthy

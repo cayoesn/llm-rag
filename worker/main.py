@@ -1,5 +1,3 @@
-import os
-import time
 from redis import Redis
 from rq import Worker, Queue, connections
 from config.settings import settings
@@ -23,7 +21,7 @@ def process_ingestion_task(file_path: str):
         raise
 
 if __name__ == '__main__':
-    with connections.Connection(redis_conn):
-        logger.info("Starting LLM-RAG Worker", queues=listen)
-        worker = Worker(list(map(Queue, listen)))
-        worker.work()
+    logger.info("Starting LLM-RAG Worker", queues=listen)
+    q = Queue(settings.REDIS_QUEUE_NAME, connection=redis_conn)
+    worker = Worker([q], connection=redis_conn)
+    worker.work()

@@ -1,5 +1,5 @@
 import ollama
-from typing import List, Dict, Any
+from typing import Dict, Any
 from langfuse import Langfuse
 from embeddings.ollama_client import OllamaEmbedder
 from qdrant.manager import QdrantManager

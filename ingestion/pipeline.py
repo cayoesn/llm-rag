@@ -1,6 +1,5 @@
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from typing import List, Dict, Any
 import uuid
 from embeddings.ollama_client import OllamaEmbedder
 from qdrant.manager import QdrantManager
