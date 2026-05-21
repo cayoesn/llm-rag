@@ -8,9 +8,9 @@
 
 > Plataforma local-first para RAG, LLMOps e observabilidade.
 
-O projeto foi montado como um case reproduzível: ele mostra como combinar API, fila assíncrona, banco vetorial, modelos locais, tracing, métricas e tracking de experimentos em um fluxo completo de ingestão e pergunta-resposta.
+Este projeto combina API, fila assíncrona, banco vetorial, modelos locais, tracing, métricas e tracking de experimentos em um fluxo completo de ingestão de documentos e pergunta-resposta com RAG.
 
-O objetivo principal é servir como referência para futuros projetos: quem abrir este repositório deve entender quais serviços existem, por que eles foram incluídos, como subir tudo, como usar a aplicação e onde verificar cada parte do fluxo.
+A aplicação permite enviar PDFs, processar o conteúdo em background, armazenar embeddings no Qdrant, consultar documentos semanticamente e gerar respostas com modelos locais via Ollama, mantendo observabilidade com Prometheus, Grafana, Jaeger, Langfuse e MLflow.
 
 ## 📚 Sumário
 
