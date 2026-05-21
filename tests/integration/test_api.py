@@ -28,7 +28,7 @@ def test_chat_endpoint(mock_answer):
 @patch("rq.Queue.enqueue")
 def test_ingest_endpoint(mock_enqueue):
     mock_job = MagicMock()
-    mock_job.get_id.return_value = "job_123"
+    mock_job.id = "job_123"
     mock_enqueue.return_value = mock_job
     
     # Create a dummy PDF content

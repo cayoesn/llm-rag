@@ -29,12 +29,15 @@ def test_qdrant_upsert(mock_qdrant_client):
 @patch('qdrant.manager.QdrantClient')
 def test_qdrant_search(mock_qdrant_client):
     mock_instance = mock_qdrant_client.return_value
-    mock_res = MagicMock()
-    mock_res.payload = {"content": "found"}
-    mock_instance.search.return_value = [mock_res]
+    mock_hit = MagicMock()
+    mock_hit.id = "point-1"
+    mock_hit.payload = {"content": "found", "metadata": {"source": "test"}}
+    mock_instance.query_points.return_value = MagicMock(points=[mock_hit])
     
     manager = QdrantManager()
     results = manager.search(vector=[0.1, 0.2])
     
     assert len(results) == 1
+    assert results[0]["id"] == "point-1"
     assert results[0]["content"] == "found"
+    assert results[0]["metadata"] == {"source": "test"}

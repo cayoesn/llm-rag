@@ -34,7 +34,7 @@ logs:
 	$(DC) logs -f
 
 test:
-	$(PYTHON) -m pytest
+	$(PYTHON) -m pytest --cov=. --cov-report=term-missing --cov-fail-under=80
 
 lint:
 	$(PYTHON) -m ruff check .
