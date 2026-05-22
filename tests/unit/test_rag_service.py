@@ -8,7 +8,9 @@ def make_service(context_docs=None):
     service.embedder = MagicMock()
     service.embedder.embed_query.return_value = [0.1, 0.2]
     service.qdrant = MagicMock()
-    service.qdrant.search.return_value = context_docs or [{"content": "known fact", "metadata": {}}]
+    service.qdrant.search.return_value = context_docs or [
+        {"content": "known fact", "metadata": {}}
+    ]
     service.ollama_client = MagicMock()
     service.ollama_client.generate.return_value = {"response": "answer"}
     service.model = "llama3"

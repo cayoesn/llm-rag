@@ -18,5 +18,8 @@ def test_process_ingestion_task_reraises_pipeline_errors():
     pipeline = MagicMock()
     pipeline.process_pdf.side_effect = RuntimeError("failed")
 
-    with patch("worker.main.IngestionPipeline", return_value=pipeline), pytest.raises(RuntimeError):
+    with (
+        patch("worker.main.IngestionPipeline", return_value=pipeline),
+        pytest.raises(RuntimeError),
+    ):
         process_ingestion_task("uploads/doc.pdf")

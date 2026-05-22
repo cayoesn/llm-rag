@@ -29,12 +29,16 @@ def test_process_pdf_embeds_chunks_upserts_and_logs_success(tmp_path):
     loader = MagicMock()
     loader.load.return_value = [document]
 
-    with patch("ingestion.pipeline.PyPDFLoader", return_value=loader), patch(
-        "ingestion.pipeline.log_ingestion_run"
-    ) as log_ingestion, patch("ingestion.pipeline.uuid.uuid4", side_effect=["id-1", "id-2"]):
+    with (
+        patch("ingestion.pipeline.PyPDFLoader", return_value=loader),
+        patch("ingestion.pipeline.log_ingestion_run") as log_ingestion,
+        patch("ingestion.pipeline.uuid.uuid4", side_effect=["id-1", "id-2"]),
+    ):
         pipeline.process_pdf(str(file_path))
 
-    pipeline.embedder.embed_documents.assert_called_once_with(["chunk one", "chunk two"])
+    pipeline.embedder.embed_documents.assert_called_once_with(
+        ["chunk one", "chunk two"]
+    )
     pipeline.qdrant.create_collection.assert_called_once_with(vector_size=2)
     pipeline.qdrant.upsert_documents.assert_called_once()
     ids, vectors, payloads = pipeline.qdrant.upsert_documents.call_args.args
@@ -54,9 +58,11 @@ def test_process_pdf_logs_failure_and_reraises(tmp_path):
     loader = MagicMock()
     loader.load.side_effect = RuntimeError("bad pdf")
 
-    with patch("ingestion.pipeline.PyPDFLoader", return_value=loader), patch(
-        "ingestion.pipeline.log_ingestion_run"
-    ) as log_ingestion, pytest.raises(RuntimeError, match="bad pdf"):
+    with (
+        patch("ingestion.pipeline.PyPDFLoader", return_value=loader),
+        patch("ingestion.pipeline.log_ingestion_run") as log_ingestion,
+        pytest.raises(RuntimeError, match="bad pdf"),
+    ):
         pipeline.process_pdf(str(file_path))
 
     log_ingestion.assert_called_once()

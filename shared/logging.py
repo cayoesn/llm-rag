@@ -3,6 +3,7 @@ import logging
 import sys
 from config.settings import settings
 
+
 def setup_logging():
     structlog.configure(
         processors=[
@@ -11,7 +12,11 @@ def setup_logging():
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.TimeStamper(fmt="iso"),
-            structlog.processors.JSONRenderer() if not settings.DEBUG else structlog.dev.ConsoleRenderer(),
+            (
+                structlog.processors.JSONRenderer()
+                if not settings.DEBUG
+                else structlog.dev.ConsoleRenderer()
+            ),
         ],
         logger_factory=structlog.PrintLoggerFactory(),
         cache_logger_on_first_use=True,
@@ -23,5 +28,6 @@ def setup_logging():
         stream=sys.stdout,
         level=logging.INFO,
     )
+
 
 logger = structlog.get_logger()

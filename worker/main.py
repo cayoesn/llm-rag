@@ -1,5 +1,5 @@
 from redis import Redis
-from rq import Worker, Queue, connections
+from rq import Worker, Queue
 from config.settings import settings
 from shared.logging import logger, setup_logging
 from ingestion.pipeline import IngestionPipeline
@@ -8,7 +8,10 @@ from ingestion.pipeline import IngestionPipeline
 setup_logging()
 
 listen = [settings.REDIS_QUEUE_NAME]
-redis_conn = Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
+redis_conn = Redis(
+    host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB
+)
+
 
 def process_ingestion_task(file_path: str):
     try:
@@ -20,7 +23,8 @@ def process_ingestion_task(file_path: str):
         logger.error("Failed to process ingestion task", error=str(e), file=file_path)
         raise
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     logger.info("Starting LLM-RAG Worker", queues=listen)
     q = Queue(settings.REDIS_QUEUE_NAME, connection=redis_conn)
     worker = Worker([q], connection=redis_conn)

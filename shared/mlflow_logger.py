@@ -188,7 +188,9 @@ def log_model_performance(
             mlflow.log_artifact(artifact_path, artifact_path="metrics")
 
         if confusion_matrix:
-            with _temp_json_artifact({"confusion_matrix": confusion_matrix}) as artifact_path:
+            with _temp_json_artifact(
+                {"confusion_matrix": confusion_matrix}
+            ) as artifact_path:
                 mlflow.log_artifact(artifact_path, artifact_path="matrices")
 
 
@@ -256,13 +258,19 @@ def transition_model_stage(model_name: str, version: int, stage: str) -> None:
 
     try:
         client = mlflow.tracking.MlflowClient()
-        client.transition_model_version_stage(name=model_name, version=version, stage=stage)
-        logger.info("Model stage updated", model=model_name, version=version, stage=stage)
+        client.transition_model_version_stage(
+            name=model_name, version=version, stage=stage
+        )
+        logger.info(
+            "Model stage updated", model=model_name, version=version, stage=stage
+        )
     except Exception as exc:
         logger.warning("Failed to transition model", error=str(exc))
 
 
-def compare_experiments(experiment_ids: List[str], metric_name: str) -> List[Dict[str, Any]]:
+def compare_experiments(
+    experiment_ids: List[str], metric_name: str
+) -> List[Dict[str, Any]]:
     setup_mlflow()
     client = mlflow.tracking.MlflowClient()
     results = []
@@ -311,7 +319,9 @@ def log_custom_metric_history(
 class MLflowRun:
     """Context manager for MLflow runs."""
 
-    def __init__(self, experiment_name: str, run_name: str, tags: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self, experiment_name: str, run_name: str, tags: Optional[Dict[str, Any]] = None
+    ):
         self.experiment_name = experiment_name
         self.run_name = run_name
         self.tags = tags or {}
@@ -340,7 +350,9 @@ def log_metrics_batch(metrics: Dict[str, Any], step: Optional[int] = None) -> No
             mlflow.log_metric(key, value, step=step)
 
 
-def log_configs_as_artifact(config: Dict[str, Any], artifact_name: str = "config.json") -> None:
+def log_configs_as_artifact(
+    config: Dict[str, Any], artifact_name: str = "config.json"
+) -> None:
     setup_mlflow()
     with _temp_json_artifact(config) as artifact_path:
         mlflow.log_artifact(artifact_path, artifact_path="configs")

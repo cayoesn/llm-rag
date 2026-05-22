@@ -40,7 +40,8 @@ lint:
 	$(PYTHON) -m ruff check .
 
 format:
-	$(PYTHON) -m ruff format .
+	black .
+	ruff check . --fix
 
 clean:
 	rm -rf `find . -type d -name __pycache__`
